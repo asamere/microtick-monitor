@@ -1,0 +1,19 @@
+{
+  "name": "mtmon",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.ts",
+  "scripts": {
+    "start": "tsc && node dist/index.js"
+  },
+  "author": "Adam",
+  "dependencies": {
+    "@types/node": "^14.0.27",
+    "axios": "^0.19.2",
+    "twilio": "^3.48.1"
+  },
+  "devDependencies": {
+    "tslint": "^5.12.1",
+    "typescript": "^3.3.3"
+  }
+}
