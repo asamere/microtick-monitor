@@ -1,6 +1,6 @@
-import axios from 'axios'
+import axios, { AxiosError } from 'axios'
 import twilio from 'twilio'
-import { BlockData, BlockRange, SigningState, Signature, State } from './types'
+import { BlockData, SigningState, Signature, State } from './types'
 
 const {
     TWILIO_SID,
@@ -28,14 +28,22 @@ const state: State = {
     processedHeight: 0
 }
 
-async function getLatestBlock() {
+async function getLatestBlock(): Promise<BlockData> {
     const { data: blockData } = await instance.get<BlockData>('/blocks/latest')
     return blockData
 }
 
-async function getBlockByHeight(height: number) {
-    const { data: blockData } = await instance.get<BlockData>(`/blocks/${height}`)
-    return blockData
+async function getBlockByHeight(height: number): Promise<BlockData> {
+    try {
+        const { data: blockData } = await instance.get<BlockData>(`/blocks/${height}`)
+        return blockData
+    } catch (e) {
+        if (e?.response?.status === 404) {
+            console.log(`block not found at heigth ${height}`)
+            return null
+        }
+        throw e
+    }
 }
 
 async function sendAlert(height: number, recovered: boolean = false): Promise<void> {
@@ -52,10 +60,10 @@ async function sendAlert(height: number, recovered: boolean = false): Promise<vo
 let lastAlert = 0
 const debouncePeriod = 60 * 60 * 1000 // 60 minutes
 async function onMissingSignature(height: number): Promise<void> {
-    console.warn(`Signature missing from last commit in block ${height}`)
+    console.warn(`monitor: Signature missing from last commit in block ${height}`)
     // are we transitioning to not signing?
     if (state.signing === SigningState.SIGNING) {
-        console.warn('transitioning from signing to not signing state')
+        console.warn('monitor: transitioning from signing to not signing state')
         state.signing = SigningState.NOT_SIGNING
         const now = Date.now()
         if ((now - lastAlert) > debouncePeriod) {
@@ -73,34 +81,29 @@ async function onValidSignatures(height: number): Promise<void> {
 
 async function monitor() {
     try {
-        let latestBlock = await getLatestBlock()
-        console.log(`monitor: latestHeight = ${latestBlock.block.header.height}, latestProcessed = ${state.processedHeight}`)
-        const range: BlockRange = {
-            start: state.processedHeight + 1,
-            end: parseInt(latestBlock.block.header.height)
-        }
-        // first run after start
-        if (state.processedHeight === 0) {
-            range.start = parseInt(latestBlock.block.header.height)
+        let height = state.processedHeight
+        if (height === 0) {
+            const latestBlock = await getLatestBlock()
+            height = parseInt(latestBlock.block.header.height)
+            console.log(`monitor: Starting monitoring at height ${height}`)
         }
 
         let missingSigHeight: number
-        let height: number
-        while (range.start <= range.end) {
-            const blockData = await getBlockByHeight(range.start)
+        let blockData: BlockData
+        while (blockData = await getBlockByHeight(height)) {
             const { block, block_id, block: { last_commit, header } } = blockData
             height = parseInt(header.height)
             console.log(`monitor: checking block at height ${height}, hash = ${block_id.hash}`)
             const validatorSig = last_commit.signatures.find((s: Signature) => s.validator_address === WATCH_VALIDATOR_ADDRESS)
 
-            !validatorSig && (missingSigHeight = parseInt(header.height))
-            range.start++
+            !validatorSig && (missingSigHeight = height)
+            height++
         }
 
         missingSigHeight ? await onMissingSignature(missingSigHeight) : await onValidSignatures(height)
-        state.processedHeight = range.end
+        state.processedHeight = height - 1
     } catch (e) {
-        console.error('Error monitoring: ', e)
+        console.error('monitor: Error monitoring ', e)
     } finally {
         // schedule next run
         setTimeout(monitor, checkFrequency)

@@ -39,8 +39,3 @@ export type State = {
     signing: SigningState,
     processedHeight: number
 }
-
-export type BlockRange = {
-    start: number,
-    end: number
-}
